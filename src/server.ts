@@ -118,15 +118,15 @@ export function startServer(options: ServerOptions): void {
     }
     // Serve login page for GET requests
     if (req.method === "GET") {
-      return res.sendFile(path.join(__dirname, "public", "login.html"));
+      return res.sendFile(path.join(__dirname, "public", "login.html"), { dotfiles: "allow" });
     }
     res.status(401).send("Unauthorized");
   });
 
-  app.use(express.static(path.join(__dirname, "public")));
+  app.use(express.static(path.join(__dirname, "public"), { dotfiles: "allow" }));
 
   app.get("/", (_req, res) => {
-    res.sendFile(path.join(__dirname, "public", "index.html"));
+    res.sendFile(path.join(__dirname, "public", "index.html"), { dotfiles: "allow" });
   });
 
   const wss = new WebSocketServer({ noServer: true });
