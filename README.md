@@ -5,18 +5,6 @@ A CLI tool that exposes an interactive web terminal in the browser, similar to [
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) >= 18
-- [tmux](https://github.com/tmux/tmux) — ccweb uses tmux to manage persistent terminal sessions
-
-```bash
-# macOS
-brew install tmux
-
-# Debian / Ubuntu
-sudo apt install tmux
-
-# RHEL / CentOS / Fedora
-sudo dnf install tmux
-```
 
 ## Install
 
