@@ -1,6 +1,6 @@
 {
   "name": "ccwebtty",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A CLI tool that exposes an interactive web terminal, similar to ttyd",
   "main": "dist/index.js",
   "bin": {
@@ -34,11 +34,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/nickcao/ccweb.git"
+    "url": "https://github.com/jerboy/ccweb.git"
   },
-  "homepage": "https://github.com/nickcao/ccweb#readme",
+  "homepage": "https://github.com/jerboy/ccweb#readme",
   "bugs": {
-    "url": "https://github.com/nickcao/ccweb/issues"
+    "url": "https://github.com/jerboy/ccweb/issues"
   },
   "dependencies": {
     "cloudflared": "^0.7.1",
