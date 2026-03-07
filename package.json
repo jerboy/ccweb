@@ -1,5 +1,5 @@
 {
-  "name": "ccweb",
+  "name": "ccwebtty",
   "version": "1.0.0",
   "description": "A CLI tool that exposes an interactive web terminal, similar to ttyd",
   "main": "dist/index.js",

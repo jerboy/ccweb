@@ -9,7 +9,7 @@ A CLI tool that exposes an interactive web terminal in the browser, similar to [
 ## Install
 
 ```bash
-npm install -g ccweb
+npm install -g ccwebtty
 ```
 
 ## Usage
