@@ -13,6 +13,7 @@ export interface ServerOptions {
   shell: string;
   username: string;
   password: string;
+  tunnel?: boolean;
 }
 
 interface ClientMessage {
@@ -61,12 +62,13 @@ function parseCookies(header: string | undefined): Record<string, string> {
 }
 
 export function startServer(options: ServerOptions): void {
-  const { port, host, shell, username, password } = options;
+  const { port, host, shell, username, password, tunnel: enableTunnel } = options;
 
   const sessionManager = new SessionManager();
   const authSecret = generateSecret();
 
   const app = express();
+  app.set("trust proxy", true);
   const server = http.createServer(app);
 
   // Track all connected WebSocket clients for tab-list broadcasting
@@ -103,7 +105,9 @@ export function startServer(options: ServerOptions): void {
       return res.status(401).send("Invalid credentials");
     }
     const token = signToken("auth", authSecret);
-    res.setHeader("Set-Cookie", `ccweb_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict`);
+    const secure = req.protocol === "https" || req.headers["x-forwarded-proto"] === "https";
+    const cookieFlags = `Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
+    res.setHeader("Set-Cookie", `ccweb_token=${encodeURIComponent(token)}; ${cookieFlags}`);
     res.redirect("/");
   });
 
@@ -126,6 +130,17 @@ export function startServer(options: ServerOptions): void {
   });
 
   const wss = new WebSocketServer({ noServer: true });
+
+  // WebSocket ping/pong keepalive (Cloudflare Tunnel idle timeout is ~100s)
+  const WS_PING_INTERVAL = 30_000;
+  const pingInterval = setInterval(() => {
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.ping();
+      }
+    }
+  }, WS_PING_INTERVAL);
+  wss.on("close", () => clearInterval(pingInterval));
 
   server.on("upgrade", (req, socket, head) => {
     if (!isAuthenticated(req.headers.cookie)) {
@@ -261,6 +276,24 @@ export function startServer(options: ServerOptions): void {
     console.log(`[ccweb] Username: ${username}`);
     console.log(`[ccweb] Password: ${password}`);
     console.log(`[ccweb] Press Ctrl+C to stop`);
+
+    // Start Cloudflare Tunnel if requested
+    if (enableTunnel) {
+      import("cloudflared").then(({ Tunnel }) => {
+        const t = new Tunnel(["tunnel", "--url", `http://localhost:${port}`, "--no-autoupdate"]);
+        t.on("url", (url: string) => {
+          console.log(`[ccweb] Tunnel: ${url}`);
+        });
+        t.on("error", (err: Error) => {
+          console.error(`[ccweb] Tunnel error: ${err.message}`);
+        });
+        const stopTunnel = () => t.stop();
+        process.on("SIGINT", stopTunnel);
+        process.on("SIGTERM", stopTunnel);
+      }).catch((err) => {
+        console.error("[ccweb] Failed to start tunnel:", err.message);
+      });
+    }
 
     // Prevent system sleep while ccweb is running
     const platform = os.platform();
