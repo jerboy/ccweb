@@ -4,7 +4,7 @@ import http from "http";
 import path from "path";
 import { WebSocketServer, WebSocket } from "ws";
 import { SessionManager } from "./session-manager";
-import { TmuxSession } from "./tmux-session";
+import { TmuxSession, type TmuxClient } from "./tmux-session";
 
 export interface ServerOptions {
   port: number;
@@ -15,10 +15,48 @@ export interface ServerOptions {
 }
 
 interface ClientMessage {
-  type: "input" | "resize" | "kill";
+  type: "input" | "resize" | "kill" | "create";
   data?: string;
   cols?: number;
   rows?: number;
+  sessionId?: string;
+}
+
+// Cookie-based auth helpers
+
+function generateSecret(): string {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+function signToken(payload: string, secret: string): string {
+  const hmac = crypto.createHmac("sha256", secret);
+  hmac.update(payload);
+  return payload + "." + hmac.digest("hex");
+}
+
+function verifyToken(token: string, secret: string): boolean {
+  const dotIdx = token.lastIndexOf(".");
+  if (dotIdx === -1) return false;
+  const payload = token.substring(0, dotIdx);
+  const sig = token.substring(dotIdx + 1);
+  const hmac = crypto.createHmac("sha256", secret);
+  hmac.update(payload);
+  const expected = hmac.digest("hex");
+  if (sig.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
+}
+
+function parseCookies(header: string | undefined): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  if (!header) return cookies;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    const key = part.substring(0, eq).trim();
+    const val = part.substring(eq + 1).trim();
+    cookies[key] = decodeURIComponent(val);
+  }
+  return cookies;
 }
 
 export function startServer(options: ServerOptions): void {
@@ -27,25 +65,58 @@ export function startServer(options: ServerOptions): void {
   TmuxSession.checkTmux();
 
   const sessionManager = new SessionManager();
-
-  const expectedAuth = "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
+  const authSecret = generateSecret();
 
   const app = express();
   const server = http.createServer(app);
 
-  function verifyAuth(auth: string | undefined): boolean {
-    if (!auth) return false;
-    const authBuf = Buffer.from(auth);
-    const expectedBuf = Buffer.from(expectedAuth);
-    if (authBuf.length !== expectedBuf.length) return false;
-    return crypto.timingSafeEqual(authBuf, expectedBuf);
+  // Track all connected WebSocket clients for tab-list broadcasting
+  const allClients = new Set<WebSocket>();
+
+  function broadcastTabs(): void {
+    const tabs = sessionManager.listIds();
+    const msg = JSON.stringify({ type: "tabs", tabs });
+    for (const client of allClients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(msg);
+      }
+    }
   }
 
+  function isAuthenticated(cookieHeader: string | undefined): boolean {
+    const cookies = parseCookies(cookieHeader);
+    const token = cookies["ccweb_token"];
+    if (!token) return false;
+    return verifyToken(token, authSecret);
+  }
+
+  // Login endpoint
+  app.use(express.urlencoded({ extended: false }));
+
+  app.post("/login", (req, res) => {
+    const { username: u, password: p } = req.body as { username?: string; password?: string };
+    if (!u || !p) {
+      return res.status(400).send("Missing credentials");
+    }
+    const uMatch = u.length === username.length && crypto.timingSafeEqual(Buffer.from(u), Buffer.from(username));
+    const pMatch = p.length === password.length && crypto.timingSafeEqual(Buffer.from(p), Buffer.from(password));
+    if (!uMatch || !pMatch) {
+      return res.status(401).send("Invalid credentials");
+    }
+    const token = signToken("auth", authSecret);
+    res.setHeader("Set-Cookie", `ccweb_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict`);
+    res.redirect("/");
+  });
+
+  // Auth middleware - skip login route and static login page
   app.use((req, res, next) => {
-    if (verifyAuth(req.headers.authorization)) {
+    if (isAuthenticated(req.headers.cookie)) {
       return next();
     }
-    res.set("WWW-Authenticate", 'Basic realm="ccweb"');
+    // Serve login page for GET requests
+    if (req.method === "GET") {
+      return res.sendFile(path.join(__dirname, "public", "login.html"));
+    }
     res.status(401).send("Unauthorized");
   });
 
@@ -58,8 +129,8 @@ export function startServer(options: ServerOptions): void {
   const wss = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", (req, socket, head) => {
-    if (!verifyAuth(req.headers.authorization)) {
-      socket.write("HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"ccweb\"\r\n\r\n");
+    if (!isAuthenticated(req.headers.cookie)) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
       return;
     }
@@ -74,38 +145,65 @@ export function startServer(options: ServerOptions): void {
     const cols = parseInt(url.searchParams.get("cols") || "80", 10);
     const rows = parseInt(url.searchParams.get("rows") || "24", 10);
 
-    let session: TmuxSession | undefined;
-    let isReconnect = false;
+    allClients.add(ws);
 
-    if (sessionId) {
-      session = sessionManager.get(sessionId);
-      if (session) isReconnect = true;
-    }
-
-    if (!session) {
-      try {
-        session = sessionManager.create(shell, cols, rows);
-      } catch (err) {
-        console.error("[ccweb] Failed to create session:", err);
-        ws.send(
-          JSON.stringify({
-            type: "output",
-            data: `\r\nFailed to create session: ${err}\r\n`,
-          })
-        );
-        ws.close();
-        return;
+    // If no sessionId, this is a control connection - send current tab list
+    if (!sessionId) {
+      // Auto-create a default session if none exist
+      if (sessionManager.listIds().length === 0) {
+        try {
+          const session = sessionManager.create(shell, cols, rows);
+          console.log(`[ccweb] Default session: ${session.id}`);
+        } catch (err) {
+          console.error("[ccweb] Failed to create default session:", err);
+        }
       }
+      ws.send(JSON.stringify({ type: "tabs", tabs: sessionManager.listIds() }));
+
+      ws.on("message", (raw: Buffer) => {
+        try {
+          const msg: ClientMessage = JSON.parse(raw.toString());
+          if (msg.type === "create") {
+            const c = msg.cols || 80;
+            const r = msg.rows || 24;
+            try {
+              const session = sessionManager.create(shell, c, r);
+              console.log(`[ccweb] New session: ${session.id}`);
+              broadcastTabs();
+            } catch (err) {
+              console.error("[ccweb] Failed to create session:", err);
+            }
+          } else if (msg.type === "kill" && msg.sessionId) {
+            console.log(`[ccweb] Session killed: ${msg.sessionId}`);
+            sessionManager.remove(msg.sessionId);
+            broadcastTabs();
+          }
+        } catch {
+          // Ignore malformed messages
+        }
+      });
+
+      ws.on("close", () => {
+        allClients.delete(ws);
+      });
+      ws.on("error", () => {
+        allClients.delete(ws);
+      });
+      return;
     }
 
-    const currentSession = session;
-    console.log(
-      `[ccweb] ${isReconnect ? "Reconnected" : "New"} session: ${currentSession.id}`
-    );
+    // Session-specific connection — each client gets its own grouped session
+    const session = sessionManager.get(sessionId);
+    if (!session) {
+      ws.send(JSON.stringify({ type: "error", data: "Session not found" }));
+      ws.close();
+      allClients.delete(ws);
+      return;
+    }
 
-    let ptyProcess: ReturnType<TmuxSession["attach"]>;
+    let client: TmuxClient;
     try {
-      ptyProcess = currentSession.attach(cols, rows);
+      client = session.attach(cols, rows);
     } catch (err) {
       console.error("[ccweb] Failed to attach session:", err);
       ws.send(
@@ -115,28 +213,27 @@ export function startServer(options: ServerOptions): void {
         })
       );
       ws.close();
+      allClients.delete(ws);
       return;
     }
 
-    ws.send(JSON.stringify({ type: "session", id: currentSession.id }));
+    console.log(`[ccweb] Client attached to session: ${sessionId} (group: ${client.groupId})`);
 
-    ptyProcess.onData((data: string) => {
+    client.pty.onData((data: string) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "output", data }));
       }
     });
 
-    let sessionKilled = false;
-
-    ptyProcess.onExit(() => {
-      if (sessionKilled) return;
-      if (!TmuxSession.exists(currentSession.id)) {
-        console.log(`[ccweb] Session ended: ${currentSession.id}`);
-        sessionManager.remove(currentSession.id);
+    client.pty.onExit(() => {
+      if (!TmuxSession.exists(sessionId)) {
+        console.log(`[ccweb] Session ended: ${sessionId}`);
+        sessionManager.remove(sessionId);
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: "exit" }));
           ws.close();
         }
+        broadcastTabs();
       }
     });
 
@@ -145,20 +242,14 @@ export function startServer(options: ServerOptions): void {
         const msg: ClientMessage = JSON.parse(raw.toString());
         switch (msg.type) {
           case "input":
-            if (msg.data && currentSession.isAttached) {
-              ptyProcess.write(msg.data);
+            if (msg.data) {
+              client.pty.write(msg.data);
             }
             break;
           case "resize":
             if (msg.cols && msg.rows) {
-              currentSession.resize(msg.cols, msg.rows);
+              client.pty.resize(msg.cols, msg.rows);
             }
-            break;
-          case "kill":
-            sessionKilled = true;
-            console.log(`[ccweb] Session killed: ${currentSession.id}`);
-            sessionManager.remove(currentSession.id);
-            ws.close();
             break;
         }
       } catch {
@@ -167,15 +258,13 @@ export function startServer(options: ServerOptions): void {
     });
 
     ws.on("close", () => {
-      if (!sessionKilled) {
-        currentSession.detach();
-      }
+      allClients.delete(ws);
+      client.dispose();
     });
 
     ws.on("error", () => {
-      if (!sessionKilled) {
-        currentSession.detach();
-      }
+      allClients.delete(ws);
+      client.dispose();
     });
   });
 

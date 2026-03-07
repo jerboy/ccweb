@@ -2,12 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content" />
   <title>ccweb - Web Terminal</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; overflow: hidden; background: #1a1b26; }
+    html { height: 100%; height: -webkit-fill-available; }
 
     #tab-bar {
       position: fixed;
@@ -21,12 +22,26 @@
       color: #565f89;
       z-index: 10;
       border-bottom: 1px solid #292e42;
-      overflow-x: auto;
-      overflow-y: hidden;
       user-select: none;
     }
 
-    #tab-bar::-webkit-scrollbar { height: 0; }
+    #tab-scroll {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: stretch;
+      overflow-x: auto;
+      overflow-y: hidden;
+    }
+
+    #tab-scroll::-webkit-scrollbar { height: 0; }
+
+    #tab-actions {
+      display: flex;
+      align-items: stretch;
+      flex-shrink: 0;
+      border-left: 1px solid #292e42;
+    }
 
     .tab {
       display: flex;
@@ -72,56 +87,242 @@
 
     .tab .close-btn:hover { background: #33467c; color: #c0caf5; }
 
-    #new-tab-btn {
+    .bar-btn {
       display: flex;
       align-items: center;
       justify-content: center;
       width: 36px;
       flex-shrink: 0;
       cursor: pointer;
-      font-size: 18px;
       color: #565f89;
       transition: background 0.15s, color 0.15s;
     }
 
-    #new-tab-btn:hover { background: #1e2030; color: #c0caf5; }
+    .bar-btn svg {
+      width: 16px;
+      height: 16px;
+    }
+
+    .bar-btn:hover { background: #1e2030; color: #c0caf5; }
+    .bar-btn.active { color: #7aa2f7; }
 
     #terminals-area {
       position: absolute;
       top: 36px; left: 0; right: 0; bottom: 0;
+      transition: bottom 0.15s;
     }
+    body.vk-visible #vk-toggle { position: absolute; right: 4px; top: 4px; z-index: 20; }
 
+    /* ---- Tab mode (default) ---- */
     .terminal-pane {
       width: 100%;
       height: 100%;
       display: none;
+      position: relative;
+    }
+
+    .terminal-pane .pane-content {
+      width: 100%;
+      height: 100%;
       padding: 4px;
     }
 
     .terminal-pane.active { display: block; }
     .terminal-pane .xterm { height: 100%; }
+
+    .pane-header {
+      display: none;
+    }
+
+    /* ---- Grid mode ---- */
+    body.grid-mode #terminals-area {
+      display: grid;
+      gap: 2px;
+      padding: 2px;
+    }
+
+    body.grid-mode .terminal-pane {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 2px solid transparent;
+      border-radius: 6px;
+      transition: border-color 0.15s;
+    }
+
+    body.grid-mode .terminal-pane.active {
+      border-color: #7aa2f7;
+    }
+
+    body.grid-mode .pane-header {
+      display: flex;
+      align-items: center;
+      height: 26px;
+      padding: 0 8px;
+      background: #16161e;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 11px;
+      color: #565f89;
+      user-select: none;
+      flex-shrink: 0;
+      border-bottom: 1px solid #292e42;
+      gap: 6px;
+    }
+
+    body.grid-mode .terminal-pane.active .pane-header {
+      color: #c0caf5;
+      background: #1e2030;
+    }
+
+    .pane-header .pane-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .pane-dot.connected { background: #9ece6a; }
+    .pane-dot.disconnected { background: #f7768e; }
+    .pane-dot.connecting { background: #e0af68; }
+
+    .pane-header .pane-label { flex: 1; }
+
+    .pane-header .pane-close {
+      width: 16px; height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 3px;
+      font-size: 13px;
+      line-height: 1;
+      color: #565f89;
+      cursor: pointer;
+    }
+    .pane-header .pane-close:hover { background: #33467c; color: #c0caf5; }
+
+    body.grid-mode .pane-content {
+      flex: 1;
+      min-height: 0;
+      padding: 2px;
+    }
+
+    /* Hide tab list in grid mode, keep action buttons */
+    body.grid-mode #tab-scroll { display: none; }
+
+    /* Virtual keyboard toolbar */
+    #vk-toggle {
+      position: fixed;
+      bottom: 8px;
+      right: 8px;
+      z-index: 20;
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      background: #292e42;
+      color: #565f89;
+      border: 1px solid #3b4261;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      transition: background 0.15s, color 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #vk-toggle:hover, #vk-toggle.active { background: #33467c; color: #c0caf5; }
+
+    #vk-bar {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: #16161e;
+      border-top: 1px solid #292e42;
+      z-index: 15;
+      display: none;
+      flex-direction: column;
+      gap: 4px;
+      padding: 6px 4px;
+      padding-bottom: max(6px, env(safe-area-inset-bottom));
+      -webkit-tap-highlight-color: transparent;
+    }
+    body.vk-visible #vk-bar { display: flex; }
+
+    .vk-row {
+      display: flex;
+      gap: 4px;
+      justify-content: center;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+    }
+    .vk-row::-webkit-scrollbar { height: 0; }
+
+    .vk-key {
+      flex: 1 1 0;
+      min-width: 44px;
+      height: 42px;
+      padding: 0 6px;
+      border-radius: 6px;
+      background: #292e42;
+      color: #a9b1d6;
+      border: 1px solid #3b4261;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      transition: background 0.1s, color 0.1s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .vk-key:active { background: #33467c; }
+    .vk-key.modifier { color: #7aa2f7; }
+    .vk-key.modifier.held { background: #7aa2f7; color: #1a1b26; border-color: #7aa2f7; }
+    .vk-key.modifier.locked { background: #9ece6a; color: #1a1b26; border-color: #9ece6a; }
+
+    .vk-key.wide { min-width: 56px; }
+    .vk-key.arrow { font-size: 18px; }
   </style>
 </head>
 <body>
   <div id="tab-bar">
-    <div id="new-tab-btn" title="New Terminal">+</div>
+    <div id="tab-scroll"></div>
+    <div id="tab-actions">
+      <div id="new-tab-btn" class="bar-btn" title="New Terminal (Ctrl+Shift+T)">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 3a.75.75 0 0 1 .75.75v3.5h3.5a.75.75 0 0 1 0 1.5h-3.5v3.5a.75.75 0 0 1-1.5 0v-3.5h-3.5a.75.75 0 0 1 0-1.5h3.5v-3.5A.75.75 0 0 1 8 3z"/></svg>
+      </div>
+      <div id="grid-toggle-btn" class="bar-btn" title="Toggle grid view (Ctrl+Shift+G)">
+        <svg id="grid-icon-enter" viewBox="0 0 16 16"><rect x="1" y="1" width="6" height="6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="1" width="6" height="6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="1" y="9" width="6" height="6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="9" width="6" height="6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+        <svg id="grid-icon-exit" viewBox="0 0 16 16" style="display:none"><rect x="2" y="2" width="12" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      </div>
+    </div>
   </div>
   <div id="terminals-area"></div>
+
+  <div id="vk-toggle" title="Toggle virtual keys">&#9000;</div>
+  <div id="vk-bar">
+    <div class="vk-row" id="vk-row-modifiers"></div>
+    <div class="vk-row" id="vk-row-keys"></div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
   <script>
     (function () {
-      var tabBar = document.getElementById('tab-bar');
+      var tabScroll = document.getElementById('tab-scroll');
       var newTabBtn = document.getElementById('new-tab-btn');
+      var gridToggleBtn = document.getElementById('grid-toggle-btn');
+      var gridIconEnter = document.getElementById('grid-icon-enter');
+      var gridIconExit = document.getElementById('grid-icon-exit');
       var terminalsArea = document.getElementById('terminals-area');
 
-      var sessions = [];
-      var activeId = null;
-      var nextId = 1;
-
-      var STORAGE_KEY = 'ccweb_sessions';
+      // Map of serverSessionId -> local tab state
+      var tabs = {};
+      var tabOrder = [];
+      var activeSessionId = null;
+      var controlWs = null;
+      var controlReconnectTimer = null;
+      var gridMode = false;
 
       var TERM_OPTIONS = {
         cursorBlink: true,
@@ -152,31 +353,164 @@
         allowProposedApi: true,
       };
 
-      function saveState() {
-        try {
-          var data = {
-            tabs: sessions.map(function (s) {
-              return { sessionId: s.serverSessionId };
-            }),
-            activeIndex: sessions.findIndex(function (s) { return s.id === activeId; }),
-          };
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-        } catch (e) {}
+      function getWsUrl(params) {
+        var protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        return protocol + '//' + location.host + '?' + params.join('&');
       }
 
-      function loadState() {
-        try {
-          var raw = localStorage.getItem(STORAGE_KEY);
-          if (raw) return JSON.parse(raw);
-        } catch (e) {}
-        return null;
+      // ---- Grid layout ----
+      function getGridCols(count) {
+        if (count <= 1) return 1;
+        if (count <= 2) return 2;
+        if (count <= 4) return 2;
+        if (count <= 6) return 3;
+        if (count <= 9) return 3;
+        return 4;
       }
 
-      function createSession(savedSessionId) {
-        var id = nextId++;
+      function updateGridLayout() {
+        if (!gridMode) {
+          terminalsArea.style.gridTemplateColumns = '';
+          terminalsArea.style.gridTemplateRows = '';
+          return;
+        }
+        var count = tabOrder.length;
+        var cols = getGridCols(count);
+        var rows = Math.ceil(count / cols);
+        terminalsArea.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
+        terminalsArea.style.gridTemplateRows = 'repeat(' + rows + ', 1fr)';
+      }
+
+      function setGridMode(enabled) {
+        gridMode = enabled;
+        document.body.classList.toggle('grid-mode', enabled);
+        gridToggleBtn.classList.toggle('active', enabled);
+        gridIconEnter.style.display = enabled ? 'none' : 'block';
+        gridIconExit.style.display = enabled ? 'block' : 'none';
+        localStorage.setItem('ccweb_grid', enabled ? '1' : '0');
+        updateGridLayout();
+        refitAllTabs();
+      }
+
+      function refitAllTabs() {
+        // Small delay to let CSS settle
+        setTimeout(function () {
+          tabOrder.forEach(function (id) {
+            var tab = tabs[id];
+            if (!tab) return;
+            tab.fitAddon.fit();
+            if (tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+              tab.ws.send(JSON.stringify({ type: 'resize', cols: tab.term.cols, rows: tab.term.rows }));
+            }
+          });
+        }, 50);
+      }
+
+      gridToggleBtn.addEventListener('click', function () {
+        setGridMode(!gridMode);
+      });
+
+      // ---- Control WebSocket ----
+      function connectControl() {
+        if (controlWs && (controlWs.readyState === WebSocket.CONNECTING || controlWs.readyState === WebSocket.OPEN)) {
+          return;
+        }
+
+        controlWs = new WebSocket(getWsUrl([]));
+
+        controlWs.onmessage = function (event) {
+          try {
+            var msg = JSON.parse(event.data);
+            if (msg.type === 'tabs') {
+              syncTabs(msg.tabs);
+            }
+          } catch (e) {}
+        };
+
+        controlWs.onclose = function () {
+          scheduleControlReconnect();
+        };
+
+        controlWs.onerror = function () {
+          controlWs.close();
+        };
+      }
+
+      function scheduleControlReconnect() {
+        if (controlReconnectTimer) return;
+        controlReconnectTimer = setTimeout(function () {
+          controlReconnectTimer = null;
+          connectControl();
+        }, 2000);
+      }
+
+      function controlSend(msg) {
+        if (controlWs && controlWs.readyState === WebSocket.OPEN) {
+          controlWs.send(JSON.stringify(msg));
+        }
+      }
+
+      // ---- Tab sync from server ----
+      function syncTabs(serverTabs) {
+        var serverSet = {};
+        serverTabs.forEach(function (id) { serverSet[id] = true; });
+
+        tabOrder.forEach(function (id) {
+          if (!serverSet[id] && tabs[id]) {
+            removeLocalTab(id);
+          }
+        });
+
+        tabOrder = [];
+        serverTabs.forEach(function (id) {
+          tabOrder.push(id);
+          if (!tabs[id]) {
+            createLocalTab(id);
+          }
+        });
+
+        if (!tabs[activeSessionId] && tabOrder.length > 0) {
+          activateTab(tabOrder[0]);
+        }
+
+        rebuildTabBar();
+        updatePaneHeaders();
+        updateGridLayout();
+
+        if (gridMode) {
+          refitAllTabs();
+        }
+      }
+
+      function createLocalTab(sessionId) {
         var pane = document.createElement('div');
         pane.className = 'terminal-pane';
-        pane.id = 'pane-' + id;
+        pane.id = 'pane-' + sessionId;
+
+        // Pane header (visible in grid mode)
+        var header = document.createElement('div');
+        header.className = 'pane-header';
+
+        var paneDot = document.createElement('span');
+        paneDot.className = 'pane-dot connecting';
+
+        var paneLabel = document.createElement('span');
+        paneLabel.className = 'pane-label';
+        paneLabel.textContent = 'Terminal';
+
+        var paneClose = document.createElement('span');
+        paneClose.className = 'pane-close';
+        paneClose.textContent = '\u00d7';
+
+        header.appendChild(paneDot);
+        header.appendChild(paneLabel);
+        header.appendChild(paneClose);
+
+        var content = document.createElement('div');
+        content.className = 'pane-content';
+
+        pane.appendChild(header);
+        pane.appendChild(content);
         terminalsArea.appendChild(pane);
 
         var term = new Terminal(TERM_OPTIONS);
@@ -184,14 +518,27 @@
         var webLinksAddon = new WebLinksAddon.WebLinksAddon();
         term.loadAddon(fitAddon);
         term.loadAddon(webLinksAddon);
-        term.open(pane);
+        term.open(content);
 
-        var session = {
-          id: id,
-          serverSessionId: savedSessionId || null,
+        // Disable iOS autofill/autocorrect bar
+        var xtermTA = content.querySelector('.xterm-helper-textarea');
+        if (xtermTA) {
+          xtermTA.setAttribute('autocomplete', 'off');
+          xtermTA.setAttribute('autocorrect', 'off');
+          xtermTA.setAttribute('autocapitalize', 'none');
+          xtermTA.setAttribute('spellcheck', 'false');
+          xtermTA.setAttribute('data-form-type', 'other');
+          xtermTA.setAttribute('data-lpignore', 'true');
+          xtermTA.setAttribute('data-1p-ignore', 'true');
+        }
+
+        var tab = {
+          sessionId: sessionId,
           term: term,
           fitAddon: fitAddon,
           pane: pane,
+          paneDot: paneDot,
+          paneLabel: paneLabel,
           tabEl: null,
           dotEl: null,
           ws: null,
@@ -199,124 +546,103 @@
           reconnectAttempts: 0,
           status: 'connecting',
           disposed: false,
-          exited: false,
         };
 
         term.onData(function (data) {
-          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-            session.ws.send(JSON.stringify({ type: 'input', data: data }));
+          if (tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+            tab.ws.send(JSON.stringify({ type: 'input', data: data }));
           }
         });
 
-        sessions.push(session);
-        createTabEl(session);
-        connectSession(session);
-        activateSession(id);
-        return session;
-      }
-
-      function createTabEl(session) {
-        var tab = document.createElement('div');
-        tab.className = 'tab';
-        tab.dataset.id = session.id;
-
-        var dot = document.createElement('span');
-        dot.className = 'dot connecting';
-
-        var label = document.createElement('span');
-        label.className = 'label';
-        label.textContent = 'Terminal ' + session.id;
-
-        var closeBtn = document.createElement('span');
-        closeBtn.className = 'close-btn';
-        closeBtn.textContent = '\u00d7';
-
-        tab.appendChild(dot);
-        tab.appendChild(label);
-        tab.appendChild(closeBtn);
-
-        tab.addEventListener('click', function (e) {
-          if (e.target === closeBtn || closeBtn.contains(e.target)) {
-            closeSession(session.id);
+        // Click pane to activate (grid mode)
+        header.addEventListener('click', function (e) {
+          if (e.target === paneClose || paneClose.contains(e.target)) {
+            controlSend({ type: 'kill', sessionId: sessionId });
           } else {
-            activateSession(session.id);
+            activateTab(sessionId);
           }
         });
 
-        tabBar.insertBefore(tab, newTabBtn);
-        session.tabEl = tab;
-        session.dotEl = dot;
-      }
+        // Double-click header to maximize (switch to tab mode)
+        header.addEventListener('dblclick', function (e) {
+          if (e.target === paneClose || paneClose.contains(e.target)) return;
+          activateTab(sessionId);
+          setGridMode(false);
+        });
 
-      function setSessionStatus(session, state) {
-        session.status = state;
-        session.dotEl.className = 'dot ' + state;
-      }
-
-      function activateSession(id) {
-        activeId = id;
-        sessions.forEach(function (s) {
-          var isActive = s.id === id;
-          s.pane.classList.toggle('active', isActive);
-          s.tabEl.classList.toggle('active', isActive);
-          if (isActive) {
-            s.fitAddon.fit();
-            s.term.focus();
+        // Click on terminal area also activates in grid mode
+        content.addEventListener('mousedown', function () {
+          if (gridMode && activeSessionId !== sessionId) {
+            activateTab(sessionId);
           }
         });
-        saveState();
+
+        tabs[sessionId] = tab;
+        connectTab(tab);
+
+        if (!activeSessionId) {
+          activateTab(sessionId);
+        }
+
+        return tab;
       }
 
-      function connectSession(session) {
-        if (session.disposed || session.exited) return;
-        if (session.ws && (session.ws.readyState === WebSocket.CONNECTING || session.ws.readyState === WebSocket.OPEN)) {
+      function removeLocalTab(sessionId) {
+        var tab = tabs[sessionId];
+        if (!tab) return;
+        tab.disposed = true;
+        if (tab.reconnectTimer) clearTimeout(tab.reconnectTimer);
+        if (tab.ws) {
+          tab.ws.onclose = null;
+          tab.ws.close();
+        }
+        tab.term.dispose();
+        tab.pane.remove();
+        delete tabs[sessionId];
+      }
+
+      function connectTab(tab) {
+        if (tab.disposed) return;
+        if (tab.ws && (tab.ws.readyState === WebSocket.CONNECTING || tab.ws.readyState === WebSocket.OPEN)) {
           return;
         }
 
-        setSessionStatus(session, 'connecting');
+        setTabStatus(tab, 'connecting');
 
-        var protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
         var params = [
-          'cols=' + session.term.cols,
-          'rows=' + session.term.rows,
+          'sessionId=' + tab.sessionId,
+          'cols=' + tab.term.cols,
+          'rows=' + tab.term.rows,
         ];
-        if (session.serverSessionId) {
-          params.push('sessionId=' + session.serverSessionId);
-        }
-        var ws = new WebSocket(protocol + '//' + location.host + '?' + params.join('&'));
-        session.ws = ws;
+        var ws = new WebSocket(getWsUrl(params));
+        tab.ws = ws;
 
         ws.onopen = function () {
-          setSessionStatus(session, 'connected');
-          session.reconnectAttempts = 0;
+          setTabStatus(tab, 'connected');
+          tab.reconnectAttempts = 0;
           ws.send(JSON.stringify({
             type: 'resize',
-            cols: session.term.cols,
-            rows: session.term.rows,
+            cols: tab.term.cols,
+            rows: tab.term.rows,
           }));
         };
 
         ws.onmessage = function (event) {
           try {
             var msg = JSON.parse(event.data);
-            if (msg.type === 'session') {
-              session.serverSessionId = msg.id;
-              saveState();
-            } else if (msg.type === 'output') {
-              session.term.write(msg.data);
+            if (msg.type === 'output') {
+              tab.term.write(msg.data);
             } else if (msg.type === 'exit') {
-              session.exited = true;
-              session.serverSessionId = null;
-              setSessionStatus(session, 'disconnected');
-              saveState();
+              tab.disposed = true;
+              setTabStatus(tab, 'disconnected');
             }
           } catch (e) {}
         };
 
         ws.onclose = function () {
-          if (session.disposed || session.exited) return;
-          setSessionStatus(session, 'disconnected');
-          scheduleReconnect(session);
+          if (tab.disposed) return;
+          setTabStatus(tab, 'disconnected');
+          scheduleTabReconnect(tab);
         };
 
         ws.onerror = function () {
@@ -324,106 +650,362 @@
         };
       }
 
-      function scheduleReconnect(session) {
-        if (session.disposed || session.reconnectTimer || session.exited) return;
-        session.reconnectAttempts++;
-        var delay = Math.min(1000 * Math.pow(1.5, session.reconnectAttempts - 1), 5000);
-        setSessionStatus(session, 'connecting');
-        session.reconnectTimer = setTimeout(function () {
-          session.reconnectTimer = null;
-          connectSession(session);
+      function scheduleTabReconnect(tab) {
+        if (tab.disposed || tab.reconnectTimer) return;
+        tab.reconnectAttempts++;
+        var delay = Math.min(1000 * Math.pow(1.5, tab.reconnectAttempts - 1), 5000);
+        setTabStatus(tab, 'connecting');
+        tab.reconnectTimer = setTimeout(function () {
+          tab.reconnectTimer = null;
+          connectTab(tab);
         }, delay);
       }
 
-      function closeSession(id) {
-        var idx = sessions.findIndex(function (s) { return s.id === id; });
-        if (idx === -1) return;
-
-        var session = sessions[idx];
-        session.disposed = true;
-
-        if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
-
-        if (session.ws && session.ws.readyState === WebSocket.OPEN && session.serverSessionId) {
-          session.ws.send(JSON.stringify({ type: 'kill' }));
+      function setTabStatus(tab, state) {
+        tab.status = state;
+        if (tab.dotEl) {
+          tab.dotEl.className = 'dot ' + state;
         }
-
-        if (session.ws) {
-          session.ws.onclose = null;
-          session.ws.close();
+        if (tab.paneDot) {
+          tab.paneDot.className = 'pane-dot ' + state;
         }
-        session.term.dispose();
-        session.pane.remove();
-        session.tabEl.remove();
-        sessions.splice(idx, 1);
+      }
 
-        if (sessions.length === 0) {
-          createSession();
-        } else if (activeId === id) {
-          var next = sessions[Math.min(idx, sessions.length - 1)];
-          activateSession(next.id);
+      // ---- Update pane headers (numbering) ----
+      function updatePaneHeaders() {
+        tabOrder.forEach(function (id, index) {
+          var tab = tabs[id];
+          if (tab && tab.paneLabel) {
+            tab.paneLabel.textContent = 'Terminal ' + (index + 1);
+          }
+        });
+      }
+
+      // ---- Tab bar rendering ----
+      function rebuildTabBar() {
+        tabScroll.innerHTML = '';
+        tabOrder.forEach(function (id, index) {
+          var tab = tabs[id];
+          if (!tab) return;
+          var el = createTabEl(tab, index + 1);
+          tabScroll.appendChild(el);
+        });
+      }
+
+      function createTabEl(tab, num) {
+        var el = document.createElement('div');
+        el.className = 'tab' + (tab.sessionId === activeSessionId ? ' active' : '');
+        el.dataset.sessionId = tab.sessionId;
+
+        var dot = document.createElement('span');
+        dot.className = 'dot ' + tab.status;
+
+        var label = document.createElement('span');
+        label.className = 'label';
+        label.textContent = 'Terminal ' + num;
+
+        var closeBtn = document.createElement('span');
+        closeBtn.className = 'close-btn';
+        closeBtn.textContent = '\u00d7';
+
+        el.appendChild(dot);
+        el.appendChild(label);
+        el.appendChild(closeBtn);
+
+        el.addEventListener('click', function (e) {
+          if (e.target === closeBtn || closeBtn.contains(e.target)) {
+            controlSend({ type: 'kill', sessionId: tab.sessionId });
+          } else {
+            activateTab(tab.sessionId);
+          }
+        });
+
+        tab.tabEl = el;
+        tab.dotEl = dot;
+        return el;
+      }
+
+      function activateTab(sessionId) {
+        activeSessionId = sessionId;
+        tabOrder.forEach(function (id) {
+          var tab = tabs[id];
+          if (!tab) return;
+          var isActive = id === sessionId;
+          tab.pane.classList.toggle('active', isActive);
+          if (tab.tabEl) tab.tabEl.classList.toggle('active', isActive);
+          if (isActive) {
+            tab.fitAddon.fit();
+            tab.term.focus();
+          }
+        });
+      }
+
+      function requestNewTab() {
+        var cols = 80;
+        var rows = 24;
+        var active = tabs[activeSessionId];
+        if (active) {
+          cols = active.term.cols;
+          rows = active.term.rows;
         }
+        controlSend({ type: 'create', cols: cols, rows: rows });
+      }
 
-        saveState();
+      function closeActiveTab() {
+        if (activeSessionId) {
+          controlSend({ type: 'kill', sessionId: activeSessionId });
+        }
       }
 
       newTabBtn.addEventListener('click', function () {
-        createSession();
+        requestNewTab();
       });
 
-      window.addEventListener('resize', function () {
-        sessions.forEach(function (s) {
-          if (s.pane.classList.contains('active')) {
-            s.fitAddon.fit();
-            if (s.ws && s.ws.readyState === WebSocket.OPEN) {
-              s.ws.send(JSON.stringify({
-                type: 'resize',
-                cols: s.term.cols,
-                rows: s.term.rows,
-              }));
-            }
-          }
-        });
-      });
+      window.addEventListener('resize', updateLayout);
 
       document.addEventListener('keydown', function (e) {
         if (!e.ctrlKey && !e.metaKey) return;
 
         if (e.shiftKey && e.key === 't') {
           e.preventDefault();
-          createSession();
+          requestNewTab();
         } else if (e.shiftKey && e.key === 'w') {
           e.preventDefault();
-          if (activeId !== null) closeSession(activeId);
+          closeActiveTab();
+        } else if (e.shiftKey && e.key === 'g') {
+          e.preventDefault();
+          setGridMode(!gridMode);
         } else if (e.key === 'Tab' && e.ctrlKey) {
           e.preventDefault();
-          if (sessions.length < 2) return;
-          var curIdx = sessions.findIndex(function (s) { return s.id === activeId; });
+          if (tabOrder.length < 2) return;
+          var curIdx = tabOrder.indexOf(activeSessionId);
           var nextIdx = e.shiftKey
-            ? (curIdx - 1 + sessions.length) % sessions.length
-            : (curIdx + 1) % sessions.length;
-          activateSession(sessions[nextIdx].id);
+            ? (curIdx - 1 + tabOrder.length) % tabOrder.length
+            : (curIdx + 1) % tabOrder.length;
+          activateTab(tabOrder[nextIdx]);
         }
       });
 
-      window.addEventListener('beforeunload', saveState);
+      // ---- Virtual Keyboard ----
+      var isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+      var isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
-      var saved = loadState();
-      if (saved && saved.tabs && saved.tabs.length > 0) {
-        var validTabs = saved.tabs.filter(function (t) { return t.sessionId; });
-        if (validTabs.length > 0) {
-          validTabs.forEach(function (tab) {
-            createSession(tab.sessionId);
-          });
-          if (typeof saved.activeIndex === 'number' && saved.activeIndex >= 0 && saved.activeIndex < sessions.length) {
-            activateSession(sessions[saved.activeIndex].id);
-          }
-        } else {
-          createSession();
-        }
-      } else {
-        createSession();
+      var vkToggle = document.getElementById('vk-toggle');
+      var vkBar = document.getElementById('vk-bar');
+      var vkRowMod = document.getElementById('vk-row-modifiers');
+      var vkRowKeys = document.getElementById('vk-row-keys');
+
+      var modState = { ctrl: false, alt: false, shift: false, meta: false };
+
+      var modifiers = [
+        { key: 'Esc', id: null },
+        { key: 'Tab', id: null },
+        { key: 'Ctrl', id: 'ctrl', cls: 'modifier' },
+        { key: 'Alt', id: 'alt', cls: 'modifier' },
+        { key: 'Shift', id: 'shift', cls: 'modifier' },
+        { key: isMac ? 'Cmd' : 'Win', id: 'meta', cls: 'modifier' },
+      ];
+
+      var extraKeys = [
+        { label: '↑', seq: '\x1b[A' },
+        { label: '↓', seq: '\x1b[B' },
+        { label: '←', seq: '\x1b[D' },
+        { label: '→', seq: '\x1b[C' },
+        { label: 'Home', seq: '\x1b[H' },
+        { label: 'End', seq: '\x1b[F' },
+        { label: 'PgUp', seq: '\x1b[5~' },
+        { label: 'PgDn', seq: '\x1b[6~' },
+        { label: 'Del', seq: '\x1b[3~' },
+        { label: 'Ins', seq: '\x1b[2~' },
+      ];
+
+      function getActiveTab() {
+        return tabs[activeSessionId];
       }
+
+      function sendToTerminal(data) {
+        var tab = getActiveTab();
+        if (tab && tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+          tab.ws.send(JSON.stringify({ type: 'input', data: data }));
+        }
+      }
+
+      function clearModifiers() {
+        for (var k in modState) {
+          if (modState[k] === true) {
+            modState[k] = false;
+          }
+        }
+        updateModButtons();
+      }
+
+      function updateModButtons() {
+        var btns = vkRowMod.querySelectorAll('.modifier');
+        btns.forEach(function (btn) {
+          var id = btn.dataset.mod;
+          btn.classList.toggle('held', modState[id] === true);
+          btn.classList.toggle('locked', modState[id] === 'locked');
+        });
+      }
+
+      function modifiedSeq(baseSeq) {
+        var m = 1;
+        if (modState.shift) m += 1;
+        if (modState.alt) m += 2;
+        if (modState.ctrl) m += 4;
+        if (modState.meta) m += 8;
+        if (m === 1) return baseSeq;
+
+        if (baseSeq.length === 3 && baseSeq[0] === '\x1b' && baseSeq[1] === '[') {
+          return '\x1b[1;' + m + baseSeq[2];
+        }
+        var tilde = baseSeq.match(/^\x1b\[(\d+)~$/);
+        if (tilde) {
+          return '\x1b[' + tilde[1] + ';' + m + '~';
+        }
+        if (baseSeq.length === 3 && baseSeq[0] === '\x1b' && baseSeq[1] === '[') {
+          return '\x1b[1;' + m + baseSeq[2];
+        }
+        return baseSeq;
+      }
+
+      // Build modifier row
+      modifiers.forEach(function (def) {
+        var btn = document.createElement('div');
+        btn.className = 'vk-key' + (def.cls ? ' ' + def.cls : '') + (def.key === 'Tab' || def.key === 'Esc' ? '' : '');
+        btn.textContent = def.key;
+        if (def.id) {
+          btn.dataset.mod = def.id;
+          var lastTap = 0;
+          btn.addEventListener('pointerdown', function (e) {
+            e.preventDefault();
+            var now = Date.now();
+            if (now - lastTap < 300) {
+              modState[def.id] = modState[def.id] === 'locked' ? false : 'locked';
+            } else {
+              modState[def.id] = modState[def.id] ? false : true;
+            }
+            lastTap = now;
+            updateModButtons();
+          });
+        } else if (def.key === 'Esc') {
+          btn.addEventListener('pointerdown', function (e) {
+            e.preventDefault();
+            sendToTerminal('\x1b');
+            clearModifiers();
+          });
+        } else if (def.key === 'Tab') {
+          btn.addEventListener('pointerdown', function (e) {
+            e.preventDefault();
+            if (modState.shift) {
+              sendToTerminal('\x1b[Z');
+            } else {
+              sendToTerminal('\t');
+            }
+            clearModifiers();
+          });
+        }
+        vkRowMod.appendChild(btn);
+      });
+
+      // Build action keys row
+      extraKeys.forEach(function (def) {
+        var btn = document.createElement('div');
+        var isArrow = def.label.length === 1 && '↑↓←→'.indexOf(def.label) !== -1;
+        btn.className = 'vk-key' + (isArrow ? ' arrow' : '');
+        btn.textContent = def.label;
+        btn.addEventListener('pointerdown', function (e) {
+          e.preventDefault();
+          sendToTerminal(modifiedSeq(def.seq));
+          clearModifiers();
+        });
+        vkRowKeys.appendChild(btn);
+      });
+
+      // Toggle visibility
+      function setVkVisible(visible) {
+        document.body.classList.toggle('vk-visible', visible);
+        vkToggle.classList.toggle('active', visible);
+        localStorage.setItem('ccweb_vk', visible ? '1' : '0');
+        setTimeout(updateLayout, 50);
+      }
+
+      vkToggle.addEventListener('click', function () {
+        setVkVisible(!document.body.classList.contains('vk-visible'));
+      });
+
+      // --- visualViewport ---
+      function refitActiveTab() {
+        if (gridMode) {
+          refitAllTabs();
+          return;
+        }
+        var tab = getActiveTab();
+        if (tab && tab.pane.classList.contains('active')) {
+          tab.fitAddon.fit();
+          if (tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+            tab.ws.send(JSON.stringify({ type: 'resize', cols: tab.term.cols, rows: tab.term.rows }));
+          }
+        }
+      }
+
+      var lastKbOffset = 0;
+
+      function updateLayout() {
+        var vv = window.visualViewport;
+        var keyboardOffset = 0;
+
+        if (vv) {
+          keyboardOffset = Math.round(window.innerHeight - vv.height - vv.offsetTop);
+          if (keyboardOffset < 0) keyboardOffset = 0;
+        }
+
+        var translate = keyboardOffset > 0
+          ? 'translateY(-' + keyboardOffset + 'px)' : '';
+        vkBar.style.transform = translate;
+        vkToggle.style.transform = translate;
+
+        var vkHeight = document.body.classList.contains('vk-visible') ? vkBar.offsetHeight : 0;
+        terminalsArea.style.bottom = (keyboardOffset + vkHeight) + 'px';
+
+        if (keyboardOffset !== lastKbOffset) {
+          lastKbOffset = keyboardOffset;
+        }
+
+        refitActiveTab();
+      }
+
+      if (window.visualViewport) {
+        var rafPending = false;
+        function onViewportChange() {
+          if (!rafPending) {
+            rafPending = true;
+            requestAnimationFrame(function () {
+              rafPending = false;
+              updateLayout();
+            });
+          }
+        }
+        window.visualViewport.addEventListener('resize', onViewportChange);
+        window.visualViewport.addEventListener('scroll', onViewportChange);
+      }
+
+      // Auto-show on touch devices, restore preference otherwise
+      var vkPref = localStorage.getItem('ccweb_vk');
+      if (vkPref !== null) {
+        setVkVisible(vkPref === '1');
+      } else if (isTouchDevice) {
+        setVkVisible(true);
+      }
+
+      // Restore grid mode preference
+      var gridPref = localStorage.getItem('ccweb_grid');
+      if (gridPref === '1') {
+        setGridMode(true);
+      }
+
+      // Start control connection
+      connectControl();
     })();
   </script>
 </body>

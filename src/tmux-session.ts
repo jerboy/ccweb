@@ -1,12 +1,18 @@
+import crypto from "crypto";
 import { spawnSync } from "child_process";
 import * as pty from "node-pty";
 import os from "os";
 
 const TMUX_SOCKET = "ccweb";
 
+export interface TmuxClient {
+  pty: pty.IPty;
+  groupId: string;
+  dispose: () => void;
+}
+
 export class TmuxSession {
   readonly id: string;
-  private ptyProcess: pty.IPty | null = null;
   private disposed = false;
 
   private constructor(id: string) {
@@ -72,12 +78,15 @@ export class TmuxSession {
     );
     TmuxSession.tmux("set-option", "-t", id, "history-limit", "50000");
     TmuxSession.tmux("set-option", "-t", id, "mouse", "on");
+    TmuxSession.tmux("set-option", "-g", "window-size", "latest");
     TmuxSession.tmux(
       "set-option",
       "-g",
       "terminal-overrides",
       ",xterm-256color:Tc"
     );
+    // Allow grouped sessions to resize independently
+    TmuxSession.tmux("set-option", "-g", "aggressive-resize", "on");
 
     return session;
   }
@@ -90,12 +99,31 @@ export class TmuxSession {
     return TmuxSession.tmux("has-session", "-t", id).success;
   }
 
-  get isAttached(): boolean {
-    return this.ptyProcess !== null;
-  }
+  /**
+   * Attach via a grouped session: creates a temporary session linked to this
+   * one so each client gets its own independent window size. The grouped
+   * session is destroyed when the client disconnects.
+   */
+  attach(cols: number, rows: number): TmuxClient {
+    const groupId = `${this.id}-c-${crypto.randomBytes(4).toString("hex")}`;
 
-  attach(cols: number, rows: number): pty.IPty {
-    this.detach();
+    // Create a grouped session sharing the same window group
+    const result = TmuxSession.tmux(
+      "new-session",
+      "-d",
+      "-s",
+      groupId,
+      "-t",
+      this.id,
+      "-x",
+      String(cols),
+      "-y",
+      String(rows)
+    );
+
+    if (!result.success) {
+      throw new Error(`Failed to create grouped session: ${groupId}`);
+    }
 
     const env = Object.assign({}, process.env, {
       TERM: "xterm-256color",
@@ -105,9 +133,9 @@ export class TmuxSession {
     });
     delete (env as Record<string, string | undefined>).NO_COLOR;
 
-    this.ptyProcess = pty.spawn(
+    const ptyProcess = pty.spawn(
       "tmux",
-      ["-L", TMUX_SOCKET, "attach-session", "-t", this.id],
+      ["-L", TMUX_SOCKET, "attach-session", "-t", groupId],
       {
         name: "xterm-256color",
         cols,
@@ -117,34 +145,22 @@ export class TmuxSession {
       }
     );
 
-    return this.ptyProcess;
-  }
-
-  detach(): void {
-    if (this.ptyProcess) {
+    const dispose = () => {
       try {
-        this.ptyProcess.kill();
+        ptyProcess.kill();
       } catch {
         // Already dead
       }
-      this.ptyProcess = null;
-    }
-  }
+      // Kill the grouped session but not the main session
+      TmuxSession.tmux("kill-session", "-t", groupId);
+    };
 
-  resize(cols: number, rows: number): void {
-    if (this.ptyProcess) {
-      try {
-        this.ptyProcess.resize(cols, rows);
-      } catch {
-        // PTY may be closed
-      }
-    }
+    return { pty: ptyProcess, groupId, dispose };
   }
 
   destroy(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.detach();
     TmuxSession.tmux("kill-session", "-t", this.id);
   }
 
