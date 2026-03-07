@@ -281,6 +281,7 @@
 
     .vk-key.wide { min-width: 56px; }
     .vk-key.arrow { font-size: 18px; }
+
   </style>
 </head>
 <body>
@@ -553,6 +554,32 @@
             tab.ws.send(JSON.stringify({ type: 'input', data: data }));
           }
         });
+
+        // Touch scrolling support for mobile browsers
+        (function (termEl, terminal) {
+          var touchStartY = 0;
+          var touchAccum = 0;
+          var lineHeight = Math.ceil(terminal.options.fontSize * 1.2) || 17;
+
+          termEl.addEventListener('touchstart', function (e) {
+            if (e.touches.length === 1) {
+              touchStartY = e.touches[0].clientY;
+              touchAccum = 0;
+            }
+          }, { passive: true });
+
+          termEl.addEventListener('touchmove', function (e) {
+            if (e.touches.length !== 1) return;
+            var dy = touchStartY - e.touches[0].clientY;
+            touchStartY = e.touches[0].clientY;
+            touchAccum += dy;
+            var lines = Math.trunc(touchAccum / lineHeight);
+            if (lines !== 0) {
+              touchAccum -= lines * lineHeight;
+              terminal.scrollLines(lines);
+            }
+          }, { passive: true });
+        })(content, term);
 
         // Click pane to activate (grid mode)
         header.addEventListener('click', function (e) {
@@ -964,7 +991,6 @@
           ? 'translateY(-' + keyboardOffset + 'px)' : '';
         vkBar.style.transform = translate;
         vkToggle.style.transform = translate;
-
         var vkHeight = document.body.classList.contains('vk-visible') ? vkBar.offsetHeight : 0;
         terminalsArea.style.bottom = (keyboardOffset + vkHeight) + 'px';
 

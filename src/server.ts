@@ -1,10 +1,11 @@
 import crypto from "crypto";
+import { spawn } from "child_process";
 import express from "express";
 import http from "http";
+import os from "os";
 import path from "path";
 import { WebSocketServer, WebSocket } from "ws";
 import { SessionManager } from "./session-manager";
-import { TmuxSession, type TmuxClient } from "./tmux-session";
 
 export interface ServerOptions {
   port: number;
@@ -61,8 +62,6 @@ function parseCookies(header: string | undefined): Record<string, string> {
 
 export function startServer(options: ServerOptions): void {
   const { port, host, shell, username, password } = options;
-
-  TmuxSession.checkTmux();
 
   const sessionManager = new SessionManager();
   const authSecret = generateSecret();
@@ -151,12 +150,8 @@ export function startServer(options: ServerOptions): void {
     if (!sessionId) {
       // Auto-create a default session if none exist
       if (sessionManager.listIds().length === 0) {
-        try {
-          const session = sessionManager.create(shell, cols, rows);
-          console.log(`[ccweb] Default session: ${session.id}`);
-        } catch (err) {
-          console.error("[ccweb] Failed to create default session:", err);
-        }
+        const session = sessionManager.create(shell, cols, rows);
+        console.log(`[ccweb] Default session: ${session.id}`);
       }
       ws.send(JSON.stringify({ type: "tabs", tabs: sessionManager.listIds() }));
 
@@ -166,13 +161,9 @@ export function startServer(options: ServerOptions): void {
           if (msg.type === "create") {
             const c = msg.cols || 80;
             const r = msg.rows || 24;
-            try {
-              const session = sessionManager.create(shell, c, r);
-              console.log(`[ccweb] New session: ${session.id}`);
-              broadcastTabs();
-            } catch (err) {
-              console.error("[ccweb] Failed to create session:", err);
-            }
+            const session = sessionManager.create(shell, c, r);
+            console.log(`[ccweb] New session: ${session.id}`);
+            broadcastTabs();
           } else if (msg.type === "kill" && msg.sessionId) {
             console.log(`[ccweb] Session killed: ${msg.sessionId}`);
             sessionManager.remove(msg.sessionId);
@@ -192,7 +183,7 @@ export function startServer(options: ServerOptions): void {
       return;
     }
 
-    // Session-specific connection — each client gets its own grouped session
+    // Session-specific connection
     const session = sessionManager.get(sessionId);
     if (!session) {
       ws.send(JSON.stringify({ type: "error", data: "Session not found" }));
@@ -201,41 +192,34 @@ export function startServer(options: ServerOptions): void {
       return;
     }
 
-    let client: TmuxClient;
-    try {
-      client = session.attach(cols, rows);
-    } catch (err) {
-      console.error("[ccweb] Failed to attach session:", err);
-      ws.send(
-        JSON.stringify({
-          type: "output",
-          data: `\r\nFailed to attach session: ${err}\r\n`,
-        })
-      );
-      ws.close();
-      allClients.delete(ws);
-      return;
+    console.log(`[ccweb] Client attached to session: ${sessionId}`);
+
+    // Replay buffered output so new clients see existing content
+    for (const chunk of session.buffer) {
+      ws.send(JSON.stringify({ type: "output", data: chunk }));
     }
 
-    console.log(`[ccweb] Client attached to session: ${sessionId} (group: ${client.groupId})`);
-
-    client.pty.onData((data: string) => {
+    // Subscribe to live output
+    const onOutput = (data: string) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "output", data }));
       }
-    });
+    };
+    session.clients.add(onOutput);
 
-    client.pty.onExit(() => {
-      if (!TmuxSession.exists(sessionId)) {
-        console.log(`[ccweb] Session ended: ${sessionId}`);
-        sessionManager.remove(sessionId);
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "exit" }));
-          ws.close();
-        }
-        broadcastTabs();
+    const onExit = () => {
+      console.log(`[ccweb] Session ended: ${sessionId}`);
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "exit" }));
+        ws.close();
       }
-    });
+      sessionManager.remove(sessionId);
+      broadcastTabs();
+    };
+    session.onExit.add(onExit);
+
+    // Resize to match this client
+    session.terminal.resize(cols, rows);
 
     ws.on("message", (raw: Buffer) => {
       try {
@@ -243,12 +227,12 @@ export function startServer(options: ServerOptions): void {
         switch (msg.type) {
           case "input":
             if (msg.data) {
-              client.pty.write(msg.data);
+              session.terminal.write(msg.data);
             }
             break;
           case "resize":
             if (msg.cols && msg.rows) {
-              client.pty.resize(msg.cols, msg.rows);
+              session.terminal.resize(msg.cols, msg.rows);
             }
             break;
         }
@@ -259,12 +243,14 @@ export function startServer(options: ServerOptions): void {
 
     ws.on("close", () => {
       allClients.delete(ws);
-      client.dispose();
+      session.clients.delete(onOutput);
+      session.onExit.delete(onExit);
     });
 
     ws.on("error", () => {
       allClients.delete(ws);
-      client.dispose();
+      session.clients.delete(onOutput);
+      session.onExit.delete(onExit);
     });
   });
 
@@ -275,6 +261,34 @@ export function startServer(options: ServerOptions): void {
     console.log(`[ccweb] Username: ${username}`);
     console.log(`[ccweb] Password: ${password}`);
     console.log(`[ccweb] Press Ctrl+C to stop`);
+
+    // Prevent system sleep while ccweb is running
+    const platform = os.platform();
+    if (platform === "darwin") {
+      const caffeinate = spawn("caffeinate", ["-s", "-w", process.pid.toString()], {
+        stdio: "ignore",
+      });
+      caffeinate.unref();
+      console.log("[ccweb] Sleep prevention enabled (caffeinate)");
+    } else if (platform === "win32") {
+      const script = `
+Add-Type -TypeDefinition @"
+using System.Runtime.InteropServices;
+public class Power {
+  [DllImport("kernel32.dll")]
+  public static extern uint SetThreadExecutionState(uint esFlags);
+}
+"@
+while($true) {
+  [Power]::SetThreadExecutionState(0x80000001)
+  Start-Sleep -Seconds 30
+}`;
+      const ps = spawn("powershell", ["-NoProfile", "-Command", script], {
+        stdio: "ignore",
+      });
+      ps.unref();
+      console.log("[ccweb] Sleep prevention enabled (SetThreadExecutionState)");
+    }
   });
 
   const shutdown = () => {

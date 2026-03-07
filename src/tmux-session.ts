@@ -77,7 +77,8 @@ export class TmuxSession {
       "xterm-256color"
     );
     TmuxSession.tmux("set-option", "-t", id, "history-limit", "50000");
-    TmuxSession.tmux("set-option", "-t", id, "mouse", "on");
+    // Do not enable tmux mouse — it hijacks xterm.js wheel scrolling
+    // TmuxSession.tmux("set-option", "-t", id, "mouse", "on");
     TmuxSession.tmux("set-option", "-g", "window-size", "latest");
     TmuxSession.tmux(
       "set-option",
@@ -98,6 +99,32 @@ export class TmuxSession {
   static exists(id: string): boolean {
     return TmuxSession.tmux("has-session", "-t", id).success;
   }
+
+  /**
+   * Scroll a tmux pane via copy-mode. Uses tmux command chaining (;)
+   * so copy-mode + scroll happen atomically in one process.
+   */
+  static scroll(
+    groupId: string,
+    direction: "up" | "down",
+    lines: number
+  ): void {
+    const cmd = direction === "up" ? "scroll-up" : "scroll-down";
+    if (direction === "up") {
+      // Enter copy-mode (-e = auto-exit at bottom) then scroll
+      TmuxSession.tmux(
+        "copy-mode", "-t", groupId, "-e",
+        ";",
+        "send-keys", "-t", groupId, "-X", "-N", String(lines), cmd
+      );
+    } else {
+      // scroll-down only works in copy-mode; if not in copy-mode it's a no-op
+      TmuxSession.tmux(
+        "send-keys", "-t", groupId, "-X", "-N", String(lines), cmd
+      );
+    }
+  }
+
 
   /**
    * Attach via a grouped session: creates a temporary session linked to this

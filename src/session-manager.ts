@@ -1,42 +1,70 @@
 import crypto from "crypto";
-import { TmuxSession } from "./tmux-session";
+import { Terminal } from "./terminal";
+
+export interface Session {
+  id: string;
+  terminal: Terminal;
+  buffer: string[];
+  clients: Set<(data: string) => void>;
+  onExit: Set<() => void>;
+  alive: boolean;
+}
+
+const MAX_BUFFER = 5000;
 
 export class SessionManager {
-  private sessions = new Map<string, TmuxSession>();
+  private sessions = new Map<string, Session>();
   private order: string[] = [];
 
-  create(shell: string, cols: number, rows: number): TmuxSession {
+  create(shell: string, cols: number, rows: number): Session {
     const id = crypto.randomUUID();
-    const session = TmuxSession.create(id, shell, cols, rows);
+    const terminal = new Terminal({ shell, cols, rows });
+
+    const session: Session = {
+      id,
+      terminal,
+      buffer: [],
+      clients: new Set(),
+      onExit: new Set(),
+      alive: true,
+    };
+
+    terminal.onData((data) => {
+      if (session.buffer.length >= MAX_BUFFER) {
+        session.buffer.shift();
+      }
+      session.buffer.push(data);
+      for (const cb of session.clients) {
+        cb(data);
+      }
+    });
+
+    terminal.onExit(() => {
+      session.alive = false;
+      for (const cb of session.onExit) {
+        cb();
+      }
+    });
+
     this.sessions.set(id, session);
     this.order.push(id);
     return session;
   }
 
-  get(id: string): TmuxSession | undefined {
-    let session = this.sessions.get(id);
-
-    // Adopt orphaned tmux session (e.g., after server restart)
-    if (!session && TmuxSession.exists(id)) {
-      session = TmuxSession.adopt(id);
-      this.sessions.set(id, session);
-      if (!this.order.includes(id)) this.order.push(id);
-    }
-
-    // tmux session died unexpectedly
-    if (session && !TmuxSession.exists(id)) {
+  get(id: string): Session | undefined {
+    const session = this.sessions.get(id);
+    if (session && !session.alive) {
       this.sessions.delete(id);
       this.order = this.order.filter((x) => x !== id);
       return undefined;
     }
-
     return session;
   }
 
   listIds(): string[] {
-    // Prune dead sessions
     this.order = this.order.filter((id) => {
-      if (TmuxSession.exists(id)) return true;
+      const s = this.sessions.get(id);
+      if (s && s.alive) return true;
       this.sessions.delete(id);
       return false;
     });
@@ -46,7 +74,7 @@ export class SessionManager {
   remove(id: string): void {
     const session = this.sessions.get(id);
     if (session) {
-      session.destroy();
+      session.terminal.kill();
       this.sessions.delete(id);
     }
     this.order = this.order.filter((x) => x !== id);
@@ -54,10 +82,9 @@ export class SessionManager {
 
   destroyAll(): void {
     for (const session of this.sessions.values()) {
-      session.destroy();
+      session.terminal.kill();
     }
     this.sessions.clear();
     this.order = [];
-    TmuxSession.destroyAll();
   }
 }
