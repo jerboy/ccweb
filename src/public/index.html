@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ccweb - Web Terminal</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow: hidden; background: #1a1b26; }
+
+    #tab-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 36px;
+      background: #16161e;
+      display: flex;
+      align-items: stretch;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 12px;
+      color: #565f89;
+      z-index: 10;
+      border-bottom: 1px solid #292e42;
+      overflow-x: auto;
+      overflow-y: hidden;
+      user-select: none;
+    }
+
+    #tab-bar::-webkit-scrollbar { height: 0; }
+
+    .tab {
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      height: 100%;
+      cursor: pointer;
+      white-space: nowrap;
+      border-right: 1px solid #292e42;
+      transition: background 0.15s, color 0.15s;
+      min-width: 0;
+      flex-shrink: 0;
+    }
+
+    .tab:hover { background: #1e2030; }
+    .tab.active { background: #1a1b26; color: #c0caf5; }
+
+    .tab .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      margin-right: 7px;
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+
+    .tab .dot.connected { background: #9ece6a; }
+    .tab .dot.disconnected { background: #f7768e; }
+    .tab .dot.connecting { background: #e0af68; }
+
+    .tab .label { margin-right: 8px; }
+
+    .tab .close-btn {
+      width: 18px; height: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      font-size: 14px;
+      line-height: 1;
+      color: #565f89;
+      flex-shrink: 0;
+    }
+
+    .tab .close-btn:hover { background: #33467c; color: #c0caf5; }
+
+    #new-tab-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      flex-shrink: 0;
+      cursor: pointer;
+      font-size: 18px;
+      color: #565f89;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    #new-tab-btn:hover { background: #1e2030; color: #c0caf5; }
+
+    #terminals-area {
+      position: absolute;
+      top: 36px; left: 0; right: 0; bottom: 0;
+    }
+
+    .terminal-pane {
+      width: 100%;
+      height: 100%;
+      display: none;
+      padding: 4px;
+    }
+
+    .terminal-pane.active { display: block; }
+    .terminal-pane .xterm { height: 100%; }
+  </style>
+</head>
+<body>
+  <div id="tab-bar">
+    <div id="new-tab-btn" title="New Terminal">+</div>
+  </div>
+  <div id="terminals-area"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
+  <script>
+    (function () {
+      var tabBar = document.getElementById('tab-bar');
+      var newTabBtn = document.getElementById('new-tab-btn');
+      var terminalsArea = document.getElementById('terminals-area');
+
+      var sessions = [];
+      var activeId = null;
+      var nextId = 1;
+
+      var TERM_OPTIONS = {
+        cursorBlink: true,
+        fontSize: 14,
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace",
+        theme: {
+          background: '#1a1b26',
+          foreground: '#a9b1d6',
+          cursor: '#c0caf5',
+          selectionBackground: '#33467c',
+          black: '#15161e',
+          red: '#f7768e',
+          green: '#9ece6a',
+          yellow: '#e0af68',
+          blue: '#7aa2f7',
+          magenta: '#bb9af7',
+          cyan: '#7dcfff',
+          white: '#a9b1d6',
+          brightBlack: '#414868',
+          brightRed: '#f7768e',
+          brightGreen: '#9ece6a',
+          brightYellow: '#e0af68',
+          brightBlue: '#7aa2f7',
+          brightMagenta: '#bb9af7',
+          brightCyan: '#7dcfff',
+          brightWhite: '#c0caf5',
+        },
+        allowProposedApi: true,
+      };
+
+      function getSession(id) {
+        return sessions.find(function (s) { return s.id === id; });
+      }
+
+      function createSession() {
+        var id = nextId++;
+        var pane = document.createElement('div');
+        pane.className = 'terminal-pane';
+        pane.id = 'pane-' + id;
+        terminalsArea.appendChild(pane);
+
+        var term = new Terminal(TERM_OPTIONS);
+        var fitAddon = new FitAddon.FitAddon();
+        var webLinksAddon = new WebLinksAddon.WebLinksAddon();
+        term.loadAddon(fitAddon);
+        term.loadAddon(webLinksAddon);
+        term.open(pane);
+
+        var session = {
+          id: id,
+          term: term,
+          fitAddon: fitAddon,
+          pane: pane,
+          tabEl: null,
+          dotEl: null,
+          ws: null,
+          reconnectTimer: null,
+          reconnectAttempts: 0,
+          status: 'connecting',
+          disposed: false,
+        };
+
+        sessions.push(session);
+        createTabEl(session);
+        connectSession(session);
+        activateSession(id);
+        return session;
+      }
+
+      function createTabEl(session) {
+        var tab = document.createElement('div');
+        tab.className = 'tab';
+        tab.dataset.id = session.id;
+
+        var dot = document.createElement('span');
+        dot.className = 'dot connecting';
+
+        var label = document.createElement('span');
+        label.className = 'label';
+        label.textContent = 'Terminal ' + session.id;
+
+        var closeBtn = document.createElement('span');
+        closeBtn.className = 'close-btn';
+        closeBtn.textContent = '\u00d7';
+
+        tab.appendChild(dot);
+        tab.appendChild(label);
+        tab.appendChild(closeBtn);
+
+        tab.addEventListener('click', function (e) {
+          if (e.target === closeBtn || closeBtn.contains(e.target)) {
+            closeSession(session.id);
+          } else {
+            activateSession(session.id);
+          }
+        });
+
+        tabBar.insertBefore(tab, newTabBtn);
+        session.tabEl = tab;
+        session.dotEl = dot;
+      }
+
+      function setSessionStatus(session, state) {
+        session.status = state;
+        session.dotEl.className = 'dot ' + state;
+      }
+
+      function activateSession(id) {
+        activeId = id;
+        sessions.forEach(function (s) {
+          var isActive = s.id === id;
+          s.pane.classList.toggle('active', isActive);
+          s.tabEl.classList.toggle('active', isActive);
+          if (isActive) {
+            s.fitAddon.fit();
+            s.term.focus();
+          }
+        });
+      }
+
+      function connectSession(session) {
+        if (session.disposed) return;
+        if (session.ws && (session.ws.readyState === WebSocket.CONNECTING || session.ws.readyState === WebSocket.OPEN)) {
+          return;
+        }
+
+        setSessionStatus(session, 'connecting');
+
+        var protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        var ws = new WebSocket(protocol + '//' + location.host);
+        session.ws = ws;
+
+        ws.onopen = function () {
+          setSessionStatus(session, 'connected');
+          session.reconnectAttempts = 0;
+          ws.send(JSON.stringify({
+            type: 'resize',
+            cols: session.term.cols,
+            rows: session.term.rows,
+          }));
+        };
+
+        ws.onmessage = function (event) {
+          try {
+            var msg = JSON.parse(event.data);
+            if (msg.type === 'output') {
+              session.term.write(msg.data);
+            } else if (msg.type === 'exit') {
+              setSessionStatus(session, 'disconnected');
+            }
+          } catch (e) {}
+        };
+
+        ws.onclose = function () {
+          if (session.disposed) return;
+          setSessionStatus(session, 'disconnected');
+          scheduleReconnect(session);
+        };
+
+        ws.onerror = function () {
+          ws.close();
+        };
+
+        session.term.onData(function (data) {
+          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+            session.ws.send(JSON.stringify({ type: 'input', data: data }));
+          }
+        });
+      }
+
+      function scheduleReconnect(session) {
+        if (session.disposed || session.reconnectTimer) return;
+        session.reconnectAttempts++;
+        var delay = Math.min(1000 * Math.pow(1.5, session.reconnectAttempts - 1), 5000);
+        setSessionStatus(session, 'connecting');
+        session.reconnectTimer = setTimeout(function () {
+          session.reconnectTimer = null;
+          connectSession(session);
+        }, delay);
+      }
+
+      function closeSession(id) {
+        var idx = sessions.findIndex(function (s) { return s.id === id; });
+        if (idx === -1) return;
+
+        var session = sessions[idx];
+        session.disposed = true;
+
+        if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
+        if (session.ws) {
+          session.ws.onclose = null;
+          session.ws.close();
+        }
+        session.term.dispose();
+        session.pane.remove();
+        session.tabEl.remove();
+        sessions.splice(idx, 1);
+
+        if (sessions.length === 0) {
+          createSession();
+        } else if (activeId === id) {
+          var next = sessions[Math.min(idx, sessions.length - 1)];
+          activateSession(next.id);
+        }
+      }
+
+      newTabBtn.addEventListener('click', function () {
+        createSession();
+      });
+
+      window.addEventListener('resize', function () {
+        sessions.forEach(function (s) {
+          if (s.pane.classList.contains('active')) {
+            s.fitAddon.fit();
+            if (s.ws && s.ws.readyState === WebSocket.OPEN) {
+              s.ws.send(JSON.stringify({
+                type: 'resize',
+                cols: s.term.cols,
+                rows: s.term.rows,
+              }));
+            }
+          }
+        });
+      });
+
+      document.addEventListener('keydown', function (e) {
+        if (!e.ctrlKey && !e.metaKey) return;
+
+        if (e.shiftKey && e.key === 't') {
+          e.preventDefault();
+          createSession();
+        } else if (e.shiftKey && e.key === 'w') {
+          e.preventDefault();
+          if (activeId !== null) closeSession(activeId);
+        } else if (e.key === 'Tab' && e.ctrlKey) {
+          e.preventDefault();
+          if (sessions.length < 2) return;
+          var curIdx = sessions.findIndex(function (s) { return s.id === activeId; });
+          var nextIdx = e.shiftKey
+            ? (curIdx - 1 + sessions.length) % sessions.length
+            : (curIdx + 1) % sessions.length;
+          activateSession(sessions[nextIdx].id);
+        }
+      });
+
+      createSession();
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+{
+  "name": "ccweb",
+  "version": "1.0.0",
+  "description": "A CLI tool that exposes an interactive web terminal, similar to ttyd",
+  "main": "dist/index.js",
+  "bin": {
+    "ccweb": "dist/index.js"
+  },
+  "scripts": {
+    "postinstall": "node -e \"const fs=require('fs'),p=require('path'),d=p.join('node_modules','node-pty','prebuilds');if(fs.existsSync(d))for(const s of fs.readdirSync(d)){const h=p.join(d,s,'spawn-helper');if(fs.existsSync(h))fs.chmodSync(h,0o755)}\"",
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/index.js"
+  },
+  "keywords": ["terminal", "web", "cli", "pty", "ttyd"],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "commander": "^14.0.3",
+    "express": "^5.2.1",
+    "node-pty": "^1.1.0",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.3.5",
+    "@types/ws": "^8.18.1",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
+}
