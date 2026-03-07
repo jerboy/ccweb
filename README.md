@@ -2,6 +2,28 @@
 
 A CLI tool that exposes an interactive web terminal in the browser, similar to [ttyd](https://github.com/tsl0922/ttyd).
 
+## Prerequisites
+
+- [Node.js](https://nodejs.org/) >= 18
+- [tmux](https://github.com/tmux/tmux) — ccweb uses tmux to manage persistent terminal sessions
+
+```bash
+# macOS
+brew install tmux
+
+# Debian / Ubuntu
+sudo apt install tmux
+
+# RHEL / CentOS / Fedora
+sudo dnf install tmux
+```
+
+## Install
+
+```bash
+npm install -g ccweb
+```
+
 ## Usage
 
 ```bash
@@ -24,6 +46,8 @@ Then open `http://localhost:8080` in your browser.
 | `-p, --port <number>` | `8080` | Port to listen on |
 | `-H, --host <address>` | `0.0.0.0` | Host to bind to |
 | `-s, --shell <path>` | `$SHELL` or `/bin/bash` | Shell to spawn |
+| `-u, --username <name>` | `cc` | Username for authentication |
+| `--password <password>` | random | Password for authentication |
 
 ## Development
 

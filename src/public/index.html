@@ -121,6 +121,8 @@
       var activeId = null;
       var nextId = 1;
 
+      var STORAGE_KEY = 'ccweb_sessions';
+
       var TERM_OPTIONS = {
         cursorBlink: true,
         fontSize: 14,
@@ -150,11 +152,27 @@
         allowProposedApi: true,
       };
 
-      function getSession(id) {
-        return sessions.find(function (s) { return s.id === id; });
+      function saveState() {
+        try {
+          var data = {
+            tabs: sessions.map(function (s) {
+              return { sessionId: s.serverSessionId };
+            }),
+            activeIndex: sessions.findIndex(function (s) { return s.id === activeId; }),
+          };
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        } catch (e) {}
       }
 
-      function createSession() {
+      function loadState() {
+        try {
+          var raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) return JSON.parse(raw);
+        } catch (e) {}
+        return null;
+      }
+
+      function createSession(savedSessionId) {
         var id = nextId++;
         var pane = document.createElement('div');
         pane.className = 'terminal-pane';
@@ -170,6 +188,7 @@
 
         var session = {
           id: id,
+          serverSessionId: savedSessionId || null,
           term: term,
           fitAddon: fitAddon,
           pane: pane,
@@ -180,7 +199,14 @@
           reconnectAttempts: 0,
           status: 'connecting',
           disposed: false,
+          exited: false,
         };
+
+        term.onData(function (data) {
+          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+            session.ws.send(JSON.stringify({ type: 'input', data: data }));
+          }
+        });
 
         sessions.push(session);
         createTabEl(session);
@@ -238,10 +264,11 @@
             s.term.focus();
           }
         });
+        saveState();
       }
 
       function connectSession(session) {
-        if (session.disposed) return;
+        if (session.disposed || session.exited) return;
         if (session.ws && (session.ws.readyState === WebSocket.CONNECTING || session.ws.readyState === WebSocket.OPEN)) {
           return;
         }
@@ -249,7 +276,14 @@
         setSessionStatus(session, 'connecting');
 
         var protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        var ws = new WebSocket(protocol + '//' + location.host);
+        var params = [
+          'cols=' + session.term.cols,
+          'rows=' + session.term.rows,
+        ];
+        if (session.serverSessionId) {
+          params.push('sessionId=' + session.serverSessionId);
+        }
+        var ws = new WebSocket(protocol + '//' + location.host + '?' + params.join('&'));
         session.ws = ws;
 
         ws.onopen = function () {
@@ -265,16 +299,22 @@
         ws.onmessage = function (event) {
           try {
             var msg = JSON.parse(event.data);
-            if (msg.type === 'output') {
+            if (msg.type === 'session') {
+              session.serverSessionId = msg.id;
+              saveState();
+            } else if (msg.type === 'output') {
               session.term.write(msg.data);
             } else if (msg.type === 'exit') {
+              session.exited = true;
+              session.serverSessionId = null;
               setSessionStatus(session, 'disconnected');
+              saveState();
             }
           } catch (e) {}
         };
 
         ws.onclose = function () {
-          if (session.disposed) return;
+          if (session.disposed || session.exited) return;
           setSessionStatus(session, 'disconnected');
           scheduleReconnect(session);
         };
@@ -282,16 +322,10 @@
         ws.onerror = function () {
           ws.close();
         };
-
-        session.term.onData(function (data) {
-          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-            session.ws.send(JSON.stringify({ type: 'input', data: data }));
-          }
-        });
       }
 
       function scheduleReconnect(session) {
-        if (session.disposed || session.reconnectTimer) return;
+        if (session.disposed || session.reconnectTimer || session.exited) return;
         session.reconnectAttempts++;
         var delay = Math.min(1000 * Math.pow(1.5, session.reconnectAttempts - 1), 5000);
         setSessionStatus(session, 'connecting');
@@ -309,6 +343,11 @@
         session.disposed = true;
 
         if (session.reconnectTimer) clearTimeout(session.reconnectTimer);
+
+        if (session.ws && session.ws.readyState === WebSocket.OPEN && session.serverSessionId) {
+          session.ws.send(JSON.stringify({ type: 'kill' }));
+        }
+
         if (session.ws) {
           session.ws.onclose = null;
           session.ws.close();
@@ -324,6 +363,8 @@
           var next = sessions[Math.min(idx, sessions.length - 1)];
           activateSession(next.id);
         }
+
+        saveState();
       }
 
       newTabBtn.addEventListener('click', function () {
@@ -365,7 +406,24 @@
         }
       });
 
-      createSession();
+      window.addEventListener('beforeunload', saveState);
+
+      var saved = loadState();
+      if (saved && saved.tabs && saved.tabs.length > 0) {
+        var validTabs = saved.tabs.filter(function (t) { return t.sessionId; });
+        if (validTabs.length > 0) {
+          validTabs.forEach(function (tab) {
+            createSession(tab.sessionId);
+          });
+          if (typeof saved.activeIndex === 'number' && saved.activeIndex >= 0 && saved.activeIndex < sessions.length) {
+            activateSession(sessions[saved.activeIndex].id);
+          }
+        } else {
+          createSession();
+        }
+      } else {
+        createSession();
+      }
     })();
   </script>
 </body>

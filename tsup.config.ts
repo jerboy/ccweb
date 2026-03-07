@@ -1,6 +1,9 @@
 import { defineConfig } from "tsup";
+import { readFileSync } from "fs";
 import { cp } from "fs/promises";
 import path from "path";
+
+const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
 
 export default defineConfig({
   entry: ["src/index.ts"],
@@ -11,7 +14,9 @@ export default defineConfig({
   banner: {
     js: "#!/usr/bin/env node",
   },
-  // node-pty uses native bindings, must be external
+  define: {
+    __VERSION__: JSON.stringify(pkg.version),
+  },
   external: ["node-pty"],
   async onSuccess() {
     await cp(

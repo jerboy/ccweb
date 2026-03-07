@@ -6,16 +6,34 @@
   "bin": {
     "ccweb": "dist/index.js"
   },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "postinstall": "node -e \"const fs=require('fs'),p=require('path'),d=p.join('node_modules','node-pty','prebuilds');if(fs.existsSync(d))for(const s of fs.readdirSync(d)){const h=p.join(d,s,'spawn-helper');if(fs.existsSync(h))fs.chmodSync(h,0o755)}\"",
     "build": "tsup",
     "dev": "tsup --watch",
-    "start": "node dist/index.js"
+    "prestart": "npm run build",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
   },
   "keywords": ["terminal", "web", "cli", "pty", "ttyd"],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nickcao/ccweb.git"
+  },
+  "homepage": "https://github.com/nickcao/ccweb#readme",
+  "bugs": {
+    "url": "https://github.com/nickcao/ccweb/issues"
+  },
   "dependencies": {
     "commander": "^14.0.3",
     "express": "^5.2.1",
