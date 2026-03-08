@@ -23,6 +23,9 @@ ccweb --port 3000 --host 127.0.0.1
 
 # Specify a different shell
 ccweb --shell /bin/bash
+
+# Expose via Cloudflare Tunnel (publicly accessible, no account required)
+ccweb --tunnel
 ```
 
 Then open `http://localhost:8080` in your browser.
@@ -36,6 +39,7 @@ Then open `http://localhost:8080` in your browser.
 | `-s, --shell <path>` | `$SHELL` or `/bin/bash` | Shell to spawn |
 | `-u, --username <name>` | `cc` | Username for authentication |
 | `--password <password>` | random | Password for authentication |
+| `--tunnel` | disabled | Expose via Cloudflare Tunnel (no account required) |
 
 ## Development
 
