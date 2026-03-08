@@ -25,8 +25,8 @@ npm install -g ccwebtty
 ## 使用 / Usage
 
 ```bash
-# 使用默认设置启动（端口 8080，监听所有网络接口）
-# Start with default settings (port 8080, all interfaces)
+# 使用默认设置启动（端口 1989，监听所有网络接口）
+# Start with default settings (port 1989, all interfaces)
 ccweb
 
 # 自定义端口和主机地址
@@ -41,25 +41,30 @@ ccweb --shell /bin/bash
 # Expose via Cloudflare Tunnel (publicly accessible, no account required)
 ccweb --tunnel
 
+# 使用自定义域名（需要 Cloudflare 账号，在 Zero Trust 后台获取 Token）
+# Use a custom domain (requires Cloudflare account, get token from Zero Trust dashboard)
+ccweb --tunnel-token eyJhIjoiNjM...
+
 # 组合使用
 # Combine options
 ccweb --port 3000 --shell /bin/zsh --tunnel
 ```
 
-然后在浏览器中打开 `http://localhost:<port>`（默认：`http://localhost:8080`）。
+然后在浏览器中打开 `http://localhost:<port>`（默认：`http://localhost:1989`）。
 
-Then open `http://localhost:<port>` in your browser (default: `http://localhost:8080`).
+Then open `http://localhost:<port>` in your browser (default: `http://localhost:1989`).
 
 ## 参数 / Options
 
 | 参数 Option | 默认值 Default | 说明 Description |
 |--------|---------|-------------|
-| `-p, --port <number>` | `8080` | 监听端口 / Port to listen on |
+| `-p, --port <number>` | `1989` | 监听端口 / Port to listen on |
 | `-H, --host <address>` | `0.0.0.0` | 绑定地址 / Host to bind to |
 | `-s, --shell <path>` | `$SHELL` or `/bin/bash` | 要启动的 Shell / Shell to spawn |
 | `-u, --username <name>` | `cc` | 认证用户名 / Username for authentication |
 | `--password <password>` | 随机生成 random | 认证密码（未设置则自动生成）/ Password for authentication |
 | `--tunnel` | 禁用 disabled | 通过 Cloudflare Tunnel 暴露到公网（无需账号）/ Expose via Cloudflare Tunnel |
+| `--tunnel-token <token>` | — | 使用 Cloudflare Tunnel Token 绑定自定义域名 / Use a Cloudflare Tunnel token for custom domain |
 
 ## 命令 / Commands
 
@@ -67,6 +72,43 @@ Then open `http://localhost:<port>` in your browser (default: `http://localhost:
 |---------|-------------|
 | `ccweb start` | 启动 Web 终端服务（默认命令）/ Start the web terminal server (default) |
 | `ccweb update` | 更新 ccweb 到最新版本 / Update ccweb to the latest version |
+
+## 自定义域名（Cloudflare Tunnel Token）/ Custom Domain
+
+除了使用 `--tunnel` 获取随机域名外，你还可以通过 Cloudflare Tunnel Token 绑定自己的域名。
+
+In addition to using `--tunnel` for a random domain, you can bind your own domain via a Cloudflare Tunnel Token.
+
+### 获取 Token / How to get a Token
+
+1. 登录 [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) 后台 / Log in to the Cloudflare Zero Trust dashboard
+2. 进入 **Networks → Tunnels**，点击 **Create a tunnel** / Go to **Networks → Tunnels**, click **Create a tunnel**
+3. 选择 **Cloudflared** 类型，为隧道命名（如 `ccweb`）/ Select **Cloudflared**, name your tunnel (e.g. `ccweb`)
+4. 在安装页面复制 Token（`eyJ` 开头的字符串）/ Copy the Token from the install page (starts with `eyJ`)
+5. 配置 **Public Hostname** / Configure **Public Hostname**:
+   - **Subdomain**: 填入子域名，如 `terminal` / Enter a subdomain, e.g. `terminal`
+   - **Domain**: 选择你在 Cloudflare 的域名 / Select your domain in Cloudflare
+   - **Service Type**: `HTTP`
+   - **URL**: `localhost:1989`（与 ccweb 端口一致）/ (must match ccweb port)
+
+### 使用 / Usage
+
+```bash
+ccweb --tunnel-token eyJhIjoiNjM...
+```
+
+配置完成后，即可通过自定义域名（如 `https://terminal.example.com`）访问终端。
+
+Once configured, you can access the terminal via your custom domain (e.g. `https://terminal.example.com`).
+
+### 对比 / Comparison
+
+| | `--tunnel` | `--tunnel-token <token>` |
+|---|---|---|
+| 域名 Domain | 随机 `*.trycloudflare.com` / Random | 自定义域名 / Custom domain |
+| 需要账号 Account | 不需要 / No | 需要 Cloudflare 账号 / Yes |
+| 持久性 Persistence | 每次启动域名不同 / Changes on restart | 固定域名 / Persistent |
+| 适用场景 Use case | 临时分享 / Temporary sharing | 长期使用 / Long-term use |
 
 ## 防止休眠 / Sleep Prevention
 

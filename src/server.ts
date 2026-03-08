@@ -14,7 +14,7 @@ export interface ServerOptions {
   username: string;
   password: string;
   tunnel?: boolean;
-  tunnelDomain?: string;
+  tunnelToken?: string;
 }
 
 interface ClientMessage {
@@ -63,7 +63,7 @@ function parseCookies(header: string | undefined): Record<string, string> {
 }
 
 export function startServer(options: ServerOptions): void {
-  const { port, host, shell, username, password, tunnel: enableTunnel, tunnelDomain } = options;
+  const { port, host, shell, username, password, tunnel: enableTunnel, tunnelToken } = options;
 
   const sessionManager = new SessionManager();
   const authSecret = generateSecret();
@@ -92,10 +92,27 @@ export function startServer(options: ServerOptions): void {
     return verifyToken(token, authSecret);
   }
 
+  // Login rate limiting: 3 failures per IP → 30 min lockout
+  const LOGIN_MAX_ATTEMPTS = 3;
+  const LOGIN_LOCKOUT_MS = 30 * 60 * 1000;
+  const loginAttempts = new Map<string, { count: number; lockedUntil: number }>();
+
+  function getClientIp(req: express.Request): string {
+    return (req.ip || req.socket.remoteAddress || "unknown");
+  }
+
   // Login endpoint
   app.use(express.urlencoded({ extended: false }));
 
   app.post("/login", (req, res) => {
+    const ip = getClientIp(req);
+    const record = loginAttempts.get(ip);
+
+    if (record && record.lockedUntil > Date.now()) {
+      const remaining = Math.ceil((record.lockedUntil - Date.now()) / 60000);
+      return res.status(429).send(`Too many failed attempts. Try again in ${remaining} minute(s).`);
+    }
+
     const { username: u, password: p } = req.body as { username?: string; password?: string };
     if (!u || !p) {
       return res.status(400).send("Missing credentials");
@@ -103,8 +120,19 @@ export function startServer(options: ServerOptions): void {
     const uMatch = u.length === username.length && crypto.timingSafeEqual(Buffer.from(u), Buffer.from(username));
     const pMatch = p.length === password.length && crypto.timingSafeEqual(Buffer.from(p), Buffer.from(password));
     if (!uMatch || !pMatch) {
-      return res.status(401).send("Invalid credentials");
+      const attempts = (record?.count || 0) + 1;
+      if (attempts >= LOGIN_MAX_ATTEMPTS) {
+        loginAttempts.set(ip, { count: attempts, lockedUntil: Date.now() + LOGIN_LOCKOUT_MS });
+        console.log(`[ccweb] IP ${ip} locked out for 30 minutes after ${attempts} failed attempts`);
+        return res.status(429).send(`Too many failed attempts. Try again in 30 minute(s).`);
+      }
+      loginAttempts.set(ip, { count: attempts, lockedUntil: 0 });
+      return res.status(401).send(`Invalid credentials (${LOGIN_MAX_ATTEMPTS - attempts} attempt(s) remaining)`);
     }
+
+    // Successful login - clear failed attempts
+    loginAttempts.delete(ip);
+
     const token = signToken("auth", authSecret);
     const secure = req.protocol === "https" || req.headers["x-forwarded-proto"] === "https";
     const cookieFlags = `Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
@@ -279,20 +307,31 @@ export function startServer(options: ServerOptions): void {
     console.log(`[ccweb] Press Ctrl+C to stop`);
 
     // Start Cloudflare Tunnel if requested
-    if (enableTunnel || tunnelDomain) {
+    if (enableTunnel || tunnelToken) {
+      console.log("[ccweb] Starting Cloudflare Tunnel...");
       import("cloudflared").then(({ Tunnel }) => {
-        const tunnelArgs = tunnelDomain
-          ? ["tunnel", "--url", `http://localhost:${port}`, "--hostname", tunnelDomain, "--no-autoupdate"]
-          : ["tunnel", "--url", `http://localhost:${port}`, "--no-autoupdate"];
-        const t = new Tunnel(tunnelArgs);
+        console.log("[ccweb] cloudflared module loaded, creating tunnel...");
+        const t = tunnelToken
+          ? Tunnel.withToken(tunnelToken)
+          : Tunnel.quick(`http://localhost:${port}`, { "--no-autoupdate": true });
+
+        console.log("[ccweb] Tunnel process PID:", t.process.pid);
         t.on("url", (url: string) => {
           console.log(`[ccweb] Tunnel: ${url}`);
         });
-        if (tunnelDomain) {
-          console.log(`[ccweb] Tunnel domain: https://${tunnelDomain}`);
-        }
+        t.on("stdout", (output: string) => {
+          const line = output.trim();
+          if (line) console.log(`[ccweb] Tunnel stdout: ${line}`);
+        });
+        t.on("stderr", (output: string) => {
+          const line = output.trim();
+          if (line) console.log(`[ccweb] Tunnel stderr: ${line}`);
+        });
         t.on("error", (err: Error) => {
           console.error(`[ccweb] Tunnel error: ${err.message}`);
+        });
+        t.on("exit", (code: number | null, signal: string | null) => {
+          console.log(`[ccweb] Tunnel exited with code=${code} signal=${signal}`);
         });
         const stopTunnel = () => t.stop();
         process.on("SIGINT", stopTunnel);

@@ -22,7 +22,7 @@ program
 program
   .command("start", { isDefault: true })
   .description("Start the web terminal server")
-  .option("-p, --port <number>", "port to listen on", "8080")
+  .option("-p, --port <number>", "port to listen on", "1989")
   .option("-H, --host <address>", "host to bind to", "0.0.0.0")
   .option(
     "-s, --shell <path>",
@@ -32,7 +32,7 @@ program
   .option("-u, --username <name>", "username for authentication", "cc")
   .option("--password <password>", "password for authentication (random if not set)")
   .option("--tunnel", "expose via Cloudflare Tunnel (no account required)")
-  .option("--tunnel-domain <domain>", "use a custom Cloudflare Tunnel domain (requires cloudflared login)")
+  .option("--tunnel-token <token>", "use a Cloudflare Tunnel token for custom domain (from Zero Trust dashboard)")
   .action(async (opts) => {
     const port = parseInt(opts.port, 10);
     if (isNaN(port) || port < 1 || port > 65535) {
@@ -52,7 +52,7 @@ program
       username: opts.username,
       password,
       tunnel: !!opts.tunnel,
-      tunnelDomain: opts.tunnelDomain,
+      tunnelToken: opts.tunnelToken,
     });
   });
 
