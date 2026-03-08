@@ -1,6 +1,6 @@
 {
   "name": "ccwebtty",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Remote-control your computer's terminal from any browser — run Claude Code, Cursor Agent, Aider and more from your phone",
   "main": "dist/index.js",
   "bin": {
