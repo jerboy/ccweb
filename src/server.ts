@@ -14,6 +14,7 @@ export interface ServerOptions {
   username: string;
   password: string;
   tunnel?: boolean;
+  tunnelDomain?: string;
 }
 
 interface ClientMessage {
@@ -62,7 +63,7 @@ function parseCookies(header: string | undefined): Record<string, string> {
 }
 
 export function startServer(options: ServerOptions): void {
-  const { port, host, shell, username, password, tunnel: enableTunnel } = options;
+  const { port, host, shell, username, password, tunnel: enableTunnel, tunnelDomain } = options;
 
   const sessionManager = new SessionManager();
   const authSecret = generateSecret();
@@ -278,12 +279,18 @@ export function startServer(options: ServerOptions): void {
     console.log(`[ccweb] Press Ctrl+C to stop`);
 
     // Start Cloudflare Tunnel if requested
-    if (enableTunnel) {
+    if (enableTunnel || tunnelDomain) {
       import("cloudflared").then(({ Tunnel }) => {
-        const t = new Tunnel(["tunnel", "--url", `http://localhost:${port}`, "--no-autoupdate"]);
+        const tunnelArgs = tunnelDomain
+          ? ["tunnel", "--url", `http://localhost:${port}`, "--hostname", tunnelDomain, "--no-autoupdate"]
+          : ["tunnel", "--url", `http://localhost:${port}`, "--no-autoupdate"];
+        const t = new Tunnel(tunnelArgs);
         t.on("url", (url: string) => {
           console.log(`[ccweb] Tunnel: ${url}`);
         });
+        if (tunnelDomain) {
+          console.log(`[ccweb] Tunnel domain: https://${tunnelDomain}`);
+        }
         t.on("error", (err: Error) => {
           console.error(`[ccweb] Tunnel error: ${err.message}`);
         });

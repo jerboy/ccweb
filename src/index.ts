@@ -32,6 +32,7 @@ program
   .option("-u, --username <name>", "username for authentication", "cc")
   .option("--password <password>", "password for authentication (random if not set)")
   .option("--tunnel", "expose via Cloudflare Tunnel (no account required)")
+  .option("--tunnel-domain <domain>", "use a custom Cloudflare Tunnel domain (requires cloudflared login)")
   .action(async (opts) => {
     const port = parseInt(opts.port, 10);
     if (isNaN(port) || port < 1 || port > 65535) {
@@ -51,6 +52,7 @@ program
       username: opts.username,
       password,
       tunnel: !!opts.tunnel,
+      tunnelDomain: opts.tunnelDomain,
     });
   });
 

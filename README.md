@@ -10,6 +10,7 @@ A CLI tool that exposes an interactive web terminal in the browser, similar to [
 - 每个浏览器标签页拥有独立的 Shell 会话 / Each browser tab gets its own independent shell session
 - 内置用户名/密码认证 / Built-in authentication (username/password)
 - 可选 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) 支持，无需账号即可公网访问 / Optional Cloudflare Tunnel support for public access
+- 自动防止系统休眠，保持后台长时间运行 / Automatic sleep prevention to keep the server running in the background
 
 ## 环境要求 / Prerequisites
 
@@ -66,6 +67,18 @@ Then open `http://localhost:<port>` in your browser (default: `http://localhost:
 |---------|-------------|
 | `ccweb start` | 启动 Web 终端服务（默认命令）/ Start the web terminal server (default) |
 | `ccweb update` | 更新 ccweb 到最新版本 / Update ccweb to the latest version |
+
+## 防止休眠 / Sleep Prevention
+
+ccweb 启动后会自动阻止系统进入休眠状态，确保终端服务在后台持续运行。
+
+When ccweb starts, it automatically prevents the system from sleeping, ensuring the terminal server keeps running in the background.
+
+| 平台 Platform | 实现方式 Implementation | 条件 Requirement |
+|---------|---------|---------|
+| macOS | `caffeinate -s -w <pid>` | 系统自带，无需额外安装 / Built-in, no extra install needed |
+| Windows | PowerShell `SetThreadExecutionState` | 系统自带，无需额外安装 / Built-in, no extra install needed |
+| Linux | 不支持 / Not supported | — |
 
 ## 开发 / Development
 
