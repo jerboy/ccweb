@@ -147,6 +147,7 @@ export function startServer(options: ServerOptions): void {
     }
     // Serve login page for GET requests
     if (req.method === "GET") {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
       return res.sendFile(path.join(__dirname, "public", "login.html"), { dotfiles: "allow" });
     }
     res.status(401).send("Unauthorized");
