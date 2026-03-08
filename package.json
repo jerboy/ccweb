@@ -1,7 +1,7 @@
 {
   "name": "ccwebtty",
-  "version": "1.0.4",
-  "description": "A CLI tool that exposes an interactive web terminal, similar to ttyd",
+  "version": "1.0.5",
+  "description": "Remote-control your computer's terminal from any browser — run Claude Code, Cursor Agent, Aider and more from your phone",
   "main": "dist/index.js",
   "bin": {
     "ccweb": "dist/index.js"
@@ -24,7 +24,13 @@
     "web",
     "cli",
     "pty",
-    "ttyd"
+    "ttyd",
+    "remote-terminal",
+    "claude-code",
+    "cursor",
+    "aider",
+    "ai-coding",
+    "cloudflare-tunnel"
   ],
   "author": "",
   "license": "ISC",
